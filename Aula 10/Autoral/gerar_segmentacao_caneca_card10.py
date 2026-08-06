@@ -276,11 +276,10 @@ def criar_camera_e_luzes(altura_objeto):
 def configurar_render():
     cena = bpy.context.scene
 
-    # Mantém compatibilidade com Blender 3.x e 4.x.
-    try:
-        cena.render.engine = "BLENDER_EEVEE_NEXT"
-    except TypeError:
-        cena.render.engine = "BLENDER_EEVEE"
+    # O vídeo usa Cycles e, no Blender 2.83, ele é a opção mais confiável para
+    # disponibilizar o passe Object Index ao Compositor.
+    cena.render.engine = "CYCLES"
+    cena.cycles.samples = 32
 
     cena.render.resolution_x = RESOLUCAO
     cena.render.resolution_y = RESOLUCAO
@@ -290,19 +289,21 @@ def configurar_render():
     cena.render.image_settings.color_depth = "8"
     cena.render.film_transparent = False
     cena.render.use_file_extension = True
+    cena.render.use_compositing = True
+    cena.render.use_sequencer = False
     cena.world.color = (0.055, 0.07, 0.10)
 
     # Ativa a saída IndexOB usada pelos nós ID Mask.
     bpy.context.view_layer.use_pass_object_index = True
 
 
-def novo_no_saida(arvore, nome, pasta_relativa, posicao):
+def novo_no_saida(arvore, nome, pasta_saida, prefixo, posicao):
     no = arvore.nodes.new("CompositorNodeOutputFile")
     no.name = nome
     no.label = nome
     no.location = posicao
-    no.base_path = str(SAIDA_DIR)
-    no.file_slots[0].path = pasta_relativa
+    no.base_path = str(pasta_saida)
+    no.file_slots[0].path = prefixo
     no.format.file_format = "PNG"
     no.format.color_mode = "BW"
     no.format.color_depth = "8"
@@ -342,13 +343,15 @@ def configurar_compositor():
     saida_caneca = novo_no_saida(
         arvore,
         "Saída - Máscara da Caneca",
-        "mascaras_caneca/caneca_",
+        SAIDA_DIR / "mascaras_caneca",
+        "caneca_",
         (260, 40),
     )
     saida_liquido = novo_no_saida(
         arvore,
         "Saída - Máscara do Líquido",
-        "mascaras_liquido/liquido_",
+        SAIDA_DIR / "mascaras_liquido",
+        "liquido_",
         (260, -180),
     )
 
@@ -387,15 +390,24 @@ def gerar_exemplos(liquido, saida_caneca, saida_liquido):
         ajustar_nivel_liquido(liquido, classe, nivel)
 
         # O nome da classe é incluído antes do número automático do frame.
-        saida_caneca.file_slots[0].path = (
-            f"mascaras_caneca/{classe}_caneca_"
-        )
-        saida_liquido.file_slots[0].path = (
-            f"mascaras_liquido/{classe}_liquido_"
-        )
+        saida_caneca.file_slots[0].path = f"{classe}_caneca_"
+        saida_liquido.file_slots[0].path = f"{classe}_liquido_"
 
         cena.render.filepath = str(pasta_rgb / f"{classe}.png")
         bpy.ops.render.render(write_still=True)
+
+        arquivos_caneca = list(
+            (SAIDA_DIR / "mascaras_caneca").glob(f"{classe}_caneca_*.png")
+        )
+        arquivos_liquido = list(
+            (SAIDA_DIR / "mascaras_liquido").glob(f"{classe}_liquido_*.png")
+        )
+        if not arquivos_caneca or not arquivos_liquido:
+            raise RuntimeError(
+                "O Compositor terminou a renderização, mas não salvou as "
+                f"máscaras da classe {classe}. Verifique se a opção "
+                "Post Processing > Compositing está ativada."
+            )
         print(f"Gerado: {classe}")
 
 
